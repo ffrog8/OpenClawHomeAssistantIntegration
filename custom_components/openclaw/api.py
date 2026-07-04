@@ -270,12 +270,13 @@ class OpenClawApiClient:
         self,
         prompt: str,
         images: list[dict[str, str]],
+        files: list[dict[str, str]] | None = None,
         session_id: str | None = None,
         model: str | None = None,
         instructions: str | None = None,
         agent_id: str | None = None,
     ) -> dict[str, Any]:
-        """Create a non-streaming OpenResponses response for image analysis."""
+        """Create a non-streaming OpenResponses response for input analysis."""
         content: list[dict[str, Any]] = [{"type": "input_text", "text": prompt}]
         for image in images:
             content.append(
@@ -285,6 +286,18 @@ class OpenClawApiClient:
                         "type": "base64",
                         "media_type": image["media_type"],
                         "data": image["data"],
+                    },
+                }
+            )
+        for file_input in files or []:
+            content.append(
+                {
+                    "type": "input_file",
+                    "filename": file_input["filename"],
+                    "source": {
+                        "type": "base64",
+                        "media_type": file_input["media_type"],
+                        "data": file_input["data"],
                     },
                 }
             )

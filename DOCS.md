@@ -195,8 +195,10 @@ mode: single
 ```
 
 
-## `openclaw.analyze_images`
-Backend-only CCTV/image analysis through OpenClaw Gateway `/v1/responses`. This service is separate from `openclaw.send_message`; it does not add chat-card attachments or frontend changes.
+## `openclaw.analyze_inputs`
+Backend-only input analysis through OpenClaw Gateway `/v1/responses`. This preferred generic service accepts local images and supported files. It is separate from `openclaw.send_message`; it does not add chat-card attachments or frontend changes.
+
+`openclaw.analyze_images` remains available for backward-compatible image-only automations, but new automations should use `openclaw.analyze_inputs`.
 
 OpenClaw must have OpenResponses enabled:
 
@@ -206,46 +208,47 @@ gateway.http.endpoints.responses.enabled = true
 
 Fields:
 - `prompt` (required)
-- `image_paths` (required local image path list; maximum 8 images, 10 MiB each)
-- `session_id` (optional, defaults to `image-analysis`)
+- `image_paths` (optional local image path list; existing image validation applies)
+- `file_paths` (optional local text, Markdown, HTML, CSV, JSON, or PDF path list)
+- `session_id` (optional, defaults to `input-analysis`)
 - `agent_id`, `model`, `instructions`, `source` (optional)
 
-The integration reads only Home Assistant-allowed local image paths, base64-encodes supported image types, returns service response data, and fires `openclaw_image_analysis_received`. It does not downscale or recompress images, so configure snapshots to produce reasonable JPEG sizes.
+The integration reads only Home Assistant-allowed local paths, base64-encodes supported image and file types, returns service response data, and fires `openclaw_image_analysis_received`. It does not downscale or recompress images. For generic files, OpenClaw Gateway/model feedback determines whether an individual attachment or total request is too large.
 
-Automation example (compare two driveway snapshots):
+Automation example (compare two image snapshots):
 
 ```yaml
 automation:
-  - alias: CCTV compare driveway snapshots with OpenClaw
+  - alias: Compare image snapshots with OpenClaw
     mode: queued
     triggers:
       - trigger: state
-        entity_id: binary_sensor.driveway_motion
+        entity_id: binary_sensor.example_motion
         to: "on"
     actions:
       - action: camera.snapshot
         target:
-          entity_id: camera.driveway
+          entity_id: camera.example
         data:
-          filename: "/config/www/cctv/driveway_before.jpg"
+          filename: "/config/www/inputs/image_before.jpg"
 
       - delay: "00:00:02"
 
       - action: camera.snapshot
         target:
-          entity_id: camera.driveway
+          entity_id: camera.example
         data:
-          filename: "/config/www/cctv/driveway_after.jpg"
+          filename: "/config/www/inputs/image_after.jpg"
 
-      - action: openclaw.analyze_images
+      - action: openclaw.analyze_inputs
         data:
           prompt: >
-            Compare these two driveway CCTV snapshots. Return compact JSON with
+            Compare these two image snapshots. Return compact JSON with
             changed, objects, risk, summary, and notify.
           image_paths:
-            - /config/www/cctv/driveway_before.jpg
-            - /config/www/cctv/driveway_after.jpg
-          session_id: cctv-driveway
+            - /config/www/inputs/image_before.jpg
+            - /config/www/inputs/image_after.jpg
+          session_id: image-compare
           agent_id: main
         response_variable: openclaw_result
 
@@ -256,7 +259,7 @@ automation:
         then:
           - action: notify.mobile_app_phone
             data:
-              title: Driveway camera
+              title: Input analysis
               message: "{{ openclaw_result.analysis }}"
 ```
 
@@ -343,7 +346,7 @@ mode: queued
 ```
 
 ## `openclaw_image_analysis_received`
-Fires after `openclaw.analyze_images` completes. Includes `analysis`, `response`, `session_id`, `agent_id`, `model`, `image_count`, `source`, and `timestamp`.
+Fires after `openclaw.analyze_inputs` completes. Includes `analysis`, `response`, `session_id`, `agent_id`, `model`, `image_count`, `file_count`, `input_count`, `source`, and `timestamp`.
 
 ## `openclaw_tool_invoked`
 Fires after `openclaw.invoke_tool` completes.

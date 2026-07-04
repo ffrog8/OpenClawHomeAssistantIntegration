@@ -35,8 +35,11 @@ from .api import OpenClawApiClient, OpenClawApiError
 from .const import (
     ATTR_ANALYSIS,
     ATTR_AGENT_ID,
+    ATTR_FILE_COUNT,
+    ATTR_FILE_PATHS,
     ATTR_IMAGE_COUNT,
     ATTR_IMAGE_PATHS,
+    ATTR_INPUT_COUNT,
     ATTR_INSTRUCTIONS,
     ATTR_MESSAGE,
     ATTR_PROMPT,
@@ -93,6 +96,7 @@ from .const import (
     OPENCLAW_CONFIG_REL_PATH,
     PLATFORMS,
     SERVICE_ANALYZE_IMAGES,
+    SERVICE_ANALYZE_INPUTS,
     SERVICE_CLEAR_HISTORY,
     SERVICE_INVOKE_TOOL,
     SERVICE_SEND_MESSAGE,
@@ -104,6 +108,7 @@ from .helpers import extract_text_recursive
 _LOGGER = logging.getLogger(__name__)
 
 _MAX_CHAT_HISTORY = 200
+_MAX_ANALYZE_INPUTS = 8
 _MAX_ANALYZE_IMAGES = 8
 _MAX_IMAGE_BYTES = 10 * 1024 * 1024
 _ALLOWED_IMAGE_MIME_TYPES = {
@@ -113,6 +118,14 @@ _ALLOWED_IMAGE_MIME_TYPES = {
     "image/webp",
     "image/heic",
     "image/heif",
+}
+_ALLOWED_FILE_MIME_TYPES = {
+    "text/plain",
+    "text/markdown",
+    "text/html",
+    "text/csv",
+    "application/json",
+    "application/pdf",
 }
 
 _VOICE_REQUEST_HEADERS = {
@@ -154,6 +167,38 @@ ANALYZE_IMAGES_SCHEMA = vol.Schema(
         vol.Optional(ATTR_INSTRUCTIONS): cv.string,
         vol.Optional(ATTR_SOURCE, default="automation"): cv.string,
     }
+)
+
+
+def _validate_analyze_inputs_schema(data: dict[str, Any]) -> dict[str, Any]:
+    """Validate that analyze_inputs has at least one image or file path."""
+    image_paths = data.get(ATTR_IMAGE_PATHS) or []
+    file_paths = data.get(ATTR_FILE_PATHS) or []
+    if not image_paths and not file_paths:
+        raise vol.Invalid("At least one image_paths or file_paths entry is required")
+    if len(image_paths) + len(file_paths) > _MAX_ANALYZE_INPUTS:
+        raise vol.Invalid(f"A maximum of {_MAX_ANALYZE_INPUTS} inputs is supported")
+    return data
+
+
+ANALYZE_INPUTS_SCHEMA = vol.All(
+    vol.Schema(
+        {
+            vol.Required(ATTR_PROMPT): cv.string,
+            vol.Optional(ATTR_IMAGE_PATHS, default=[]): vol.All(
+                cv.ensure_list, [cv.string], vol.Length(max=_MAX_ANALYZE_IMAGES)
+            ),
+            vol.Optional(ATTR_FILE_PATHS, default=[]): vol.All(
+                cv.ensure_list, [cv.string], vol.Length(max=_MAX_ANALYZE_INPUTS)
+            ),
+            vol.Optional(ATTR_SESSION_ID, default="input-analysis"): cv.string,
+            vol.Optional(ATTR_AGENT_ID): cv.string,
+            vol.Optional(ATTR_MODEL): cv.string,
+            vol.Optional(ATTR_INSTRUCTIONS): cv.string,
+            vol.Optional(ATTR_SOURCE, default="automation"): cv.string,
+        }
+    ),
+    _validate_analyze_inputs_schema,
 )
 
 CLEAR_HISTORY_SCHEMA = vol.Schema(
@@ -545,11 +590,12 @@ def _async_register_services(hass: HomeAssistant) -> None:
                 },
             )
 
-    async def handle_analyze_images(call: ServiceCall) -> dict[str, Any]:
-        """Handle the openclaw.analyze_images service call."""
+    async def handle_analyze_inputs(call: ServiceCall) -> dict[str, Any]:
+        """Handle OpenClaw input analysis service calls."""
         prompt: str = call.data[ATTR_PROMPT]
-        image_paths: list[str] = call.data[ATTR_IMAGE_PATHS]
-        session_id: str = call.data.get(ATTR_SESSION_ID) or "image-analysis"
+        image_paths: list[str] = call.data.get(ATTR_IMAGE_PATHS) or []
+        file_paths: list[str] = call.data.get(ATTR_FILE_PATHS) or []
+        session_id: str = call.data.get(ATTR_SESSION_ID) or "input-analysis"
         call_agent_id = _normalize_optional_text(call.data.get(ATTR_AGENT_ID))
         call_model = _normalize_optional_text(call.data.get(ATTR_MODEL))
         instructions = _normalize_optional_text(call.data.get(ATTR_INSTRUCTIONS))
@@ -566,18 +612,20 @@ def _async_register_services(hass: HomeAssistant) -> None:
         model = call_model or active_model
 
         images = await _async_read_analysis_images(hass, image_paths)
+        files = await _async_read_analysis_files(hass, file_paths)
 
         try:
             response = await client.async_create_response(
                 prompt=prompt,
                 images=images,
+                files=files,
                 session_id=session_id,
                 model=model,
                 instructions=instructions,
                 agent_id=call_agent_id,
             )
         except OpenClawApiError as err:
-            raise HomeAssistantError(f"OpenClaw image analysis failed: {err}") from err
+            raise HomeAssistantError(f"OpenClaw input analysis failed: {err}") from err
 
         analysis = _extract_response_analysis(response)
         timestamp = datetime.now(timezone.utc).isoformat()
@@ -589,6 +637,8 @@ def _async_register_services(hass: HomeAssistant) -> None:
             ATTR_AGENT_ID: call_agent_id,
             ATTR_MODEL: model_used or model,
             ATTR_IMAGE_COUNT: len(images),
+            ATTR_FILE_COUNT: len(files),
+            ATTR_INPUT_COUNT: len(images) + len(files),
             ATTR_SOURCE: source,
             ATTR_TIMESTAMP: timestamp,
         }
@@ -680,11 +730,19 @@ def _async_register_services(hass: HomeAssistant) -> None:
             handle_send_message,
             schema=SEND_MESSAGE_SCHEMA,
         )
+    if not hass.services.has_service(DOMAIN, SERVICE_ANALYZE_INPUTS):
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_ANALYZE_INPUTS,
+            handle_analyze_inputs,
+            schema=ANALYZE_INPUTS_SCHEMA,
+            supports_response=SupportsResponse.OPTIONAL,
+        )
     if not hass.services.has_service(DOMAIN, SERVICE_ANALYZE_IMAGES):
         hass.services.async_register(
             DOMAIN,
             SERVICE_ANALYZE_IMAGES,
-            handle_analyze_images,
+            handle_analyze_inputs,
             schema=ANALYZE_IMAGES_SCHEMA,
             supports_response=SupportsResponse.OPTIONAL,
         )
@@ -732,10 +790,10 @@ def _get_entry_options(hass: HomeAssistant, entry_data: dict[str, Any]) -> dict[
     return latest_entry.options if latest_entry else {}
 
 
-def _resolve_analysis_image_path(hass: HomeAssistant, raw_path: str) -> Path:
-    """Resolve an image path against HA config and enforce HA path allow rules."""
+def _resolve_analysis_input_path(hass: HomeAssistant, raw_path: str) -> Path:
+    """Resolve an input path against HA config and enforce HA path allow rules."""
     if not raw_path.strip():
-        raise ServiceValidationError("Image paths must not be empty")
+        raise ServiceValidationError("Input paths must not be empty")
 
     path = Path(raw_path).expanduser()
     if not path.is_absolute():
@@ -745,7 +803,7 @@ def _resolve_analysis_image_path(hass: HomeAssistant, raw_path: str) -> Path:
     is_allowed_path = getattr(hass.config, "is_allowed_path", None)
     if callable(is_allowed_path) and not is_allowed_path(str(path)):
         raise ServiceValidationError(
-            "Image path is not allowed by Home Assistant path configuration"
+            "Input path is not allowed by Home Assistant path configuration"
         )
     return path
 
@@ -793,7 +851,7 @@ async def _async_read_analysis_images(
     """Read, validate, and base64-encode analysis images."""
     images: list[dict[str, str]] = []
     for raw_path in image_paths:
-        path = _resolve_analysis_image_path(hass, raw_path)
+        path = _resolve_analysis_input_path(hass, raw_path)
         media_type = _guess_image_media_type(path)
         data = await hass.async_add_executor_job(_read_analysis_image, path)
         images.append(
@@ -803,6 +861,59 @@ async def _async_read_analysis_images(
             }
         )
     return images
+
+
+def _guess_file_media_type(path: Path) -> str:
+    """Return a supported MIME type for a generic input file path."""
+    suffix = path.suffix.lower()
+    suffix_media_types = {
+        ".txt": "text/plain",
+        ".md": "text/markdown",
+        ".markdown": "text/markdown",
+        ".html": "text/html",
+        ".htm": "text/html",
+        ".csv": "text/csv",
+        ".json": "application/json",
+        ".pdf": "application/pdf",
+    }
+    media_type = suffix_media_types.get(suffix) or mimetypes.guess_type(path.name)[0]
+    if media_type not in _ALLOWED_FILE_MIME_TYPES:
+        raise ServiceValidationError(
+            f"Unsupported file type for '{path.name}'. Supported types: "
+            f"{', '.join(sorted(_ALLOWED_FILE_MIME_TYPES))}"
+        )
+    return media_type
+
+
+def _read_analysis_file(path: Path) -> bytes:
+    """Read a generic input file after validating it is a regular file."""
+    if not path.exists():
+        raise ServiceValidationError(f"Input file does not exist: {path.name}")
+    if not path.is_file():
+        raise ServiceValidationError(f"Input path is not a file: {path.name}")
+    try:
+        return path.read_bytes()
+    except OSError as err:
+        raise HomeAssistantError(f"Unable to read input file '{path.name}': {err}") from err
+
+
+async def _async_read_analysis_files(
+    hass: HomeAssistant, file_paths: list[str]
+) -> list[dict[str, str]]:
+    """Read, validate, and base64-encode generic analysis files."""
+    files: list[dict[str, str]] = []
+    for raw_path in file_paths:
+        path = _resolve_analysis_input_path(hass, raw_path)
+        media_type = _guess_file_media_type(path)
+        data = await hass.async_add_executor_job(_read_analysis_file, path)
+        files.append(
+            {
+                "filename": path.name,
+                "media_type": media_type,
+                "data": base64.b64encode(data).decode("ascii"),
+            }
+        )
+    return files
 
 
 def _extract_response_analysis(response: dict[str, Any]) -> str:

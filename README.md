@@ -28,7 +28,8 @@ OpenClaw is a Home Assistant custom integration that connects your HA instance t
   - `openclaw.send_message`
   - `openclaw.clear_history`
   - `openclaw.invoke_tool`
-  - `openclaw.analyze_images`
+  - `openclaw.analyze_inputs` (preferred)
+  - `openclaw.analyze_images` (backward-compatible image-only alias)
 - **Integration options** for model selection and voice-specific routing
 - **Event**
   - `openclaw_message_received`
@@ -254,9 +255,11 @@ data:
 ```
 
 
-### `openclaw.analyze_images`
+### `openclaw.analyze_inputs`
 
-Analyze one or more local Home Assistant image files with OpenClaw Gateway `/v1/responses`. This is a backend-only automation service for CCTV snapshots; it does not add chat-card attachments and does not change `openclaw.send_message`.
+Analyze local Home Assistant images and supported files with OpenClaw Gateway `/v1/responses`. This is the preferred backend-only automation service for input analysis; it does not add chat-card attachments and does not change `openclaw.send_message`.
+
+`openclaw.analyze_images` remains available for backward-compatible image-only automations, but new automations should use `openclaw.analyze_inputs`.
 
 OpenClaw must have the OpenResponses endpoint enabled:
 
@@ -264,52 +267,53 @@ OpenClaw must have the OpenResponses endpoint enabled:
 gateway.http.endpoints.responses.enabled = true
 ```
 
-The service reads local image paths that Home Assistant is allowed to access, base64-encodes supported images, sends them to OpenClaw, returns service response data, and fires `openclaw_image_analysis_received`. Configure `camera.snapshot` or camera settings to produce reasonably sized JPEGs; images are not downscaled or recompressed by the integration.
+The service reads local paths that Home Assistant is allowed to access, base64-encodes supported images and files, sends them to OpenClaw, returns service response data, and fires `openclaw_image_analysis_received`. Images are not downscaled or recompressed by the integration. For generic files, OpenClaw Gateway/model feedback determines whether an individual attachment or total request is too large.
 
 Fields:
 
 - `prompt` (required)
-- `image_paths` (required list of local image paths; maximum 8 images, 10 MiB each)
-- `session_id` (optional; defaults to `image-analysis`)
+- `image_paths` (optional list of local image paths; existing image validation applies)
+- `file_paths` (optional list of local text, Markdown, HTML, CSV, JSON, or PDF paths)
+- `session_id` (optional; defaults to `input-analysis`)
 - `agent_id` (optional)
 - `model` (optional)
 - `instructions` (optional)
 - `source` (optional; defaults to `automation`)
 
-CCTV comparison example:
+Two-image comparison example:
 
 ```yaml
 automation:
-  - alias: CCTV compare driveway snapshots with OpenClaw
+  - alias: Compare image snapshots with OpenClaw
     mode: queued
     triggers:
       - trigger: state
-        entity_id: binary_sensor.driveway_motion
+        entity_id: binary_sensor.example_motion
         to: "on"
     actions:
       - action: camera.snapshot
         target:
-          entity_id: camera.driveway
+          entity_id: camera.example
         data:
-          filename: "/config/www/cctv/driveway_before.jpg"
+          filename: "/config/www/inputs/image_before.jpg"
 
       - delay: "00:00:02"
 
       - action: camera.snapshot
         target:
-          entity_id: camera.driveway
+          entity_id: camera.example
         data:
-          filename: "/config/www/cctv/driveway_after.jpg"
+          filename: "/config/www/inputs/image_after.jpg"
 
-      - action: openclaw.analyze_images
+      - action: openclaw.analyze_inputs
         data:
           prompt: >
-            Compare these two driveway CCTV snapshots. Return compact JSON with
+            Compare these two image snapshots. Return compact JSON with
             changed, objects, risk, summary, and notify.
           image_paths:
-            - /config/www/cctv/driveway_before.jpg
-            - /config/www/cctv/driveway_after.jpg
-          session_id: cctv-driveway
+            - /config/www/inputs/image_before.jpg
+            - /config/www/inputs/image_after.jpg
+          session_id: image-compare
           agent_id: main
         response_variable: openclaw_result
 
@@ -320,7 +324,7 @@ automation:
         then:
           - action: notify.mobile_app_phone
             data:
-              title: Driveway camera
+              title: Input analysis
               message: "{{ openclaw_result.analysis }}"
 ```
 
@@ -343,7 +347,7 @@ automation:
 4. In **Home Assistant Developer Tools > Actions**, call:
 
    ```yaml
-   action: openclaw.analyze_images
+   action: openclaw.analyze_inputs
    data:
      prompt: "Describe this CCTV image in one sentence."
      image_paths:
@@ -361,6 +365,8 @@ automation:
    - `agent_id`
    - `model`
    - `image_count`
+   - `file_count`
+   - `input_count`
    - `source`
    - `timestamp`
 
@@ -435,7 +441,7 @@ action:
 
 ### `openclaw_image_analysis_received`
 
-Fired when `openclaw.analyze_images` completes. Event data includes `analysis`, `response`, `session_id`, `agent_id`, `model`, `image_count`, `source`, and `timestamp`.
+Fired when `openclaw.analyze_inputs` completes. Event data includes `analysis`, `response`, `session_id`, `agent_id`, `model`, `image_count`, `file_count`, `input_count`, `source`, and `timestamp`.
 
 ### `openclaw_tool_invoked`
 
