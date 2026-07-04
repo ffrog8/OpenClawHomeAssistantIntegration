@@ -293,10 +293,10 @@ class OpenClawApiClient:
             content.append(
                 {
                     "type": "input_file",
-                    "filename": file_input["filename"],
                     "source": {
                         "type": "base64",
                         "media_type": file_input["media_type"],
+                        "filename": file_input["filename"],
                         "data": file_input["data"],
                     },
                 }

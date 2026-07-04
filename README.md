@@ -267,7 +267,7 @@ OpenClaw must have the OpenResponses endpoint enabled:
 gateway.http.endpoints.responses.enabled = true
 ```
 
-The service reads local paths that Home Assistant is allowed to access, base64-encodes supported images and files, sends them to OpenClaw, returns service response data, and fires `openclaw_image_analysis_received`. Images are not downscaled or recompressed by the integration. For generic files, OpenClaw Gateway/model feedback determines whether an individual attachment or total request is too large.
+The service reads local paths that Home Assistant is allowed to access, base64-encodes supported images and files, sends them to OpenClaw, returns service response data, and fires `openclaw_input_analysis_received`. Images are not downscaled or recompressed by the integration. For generic files, OpenClaw Gateway enforces its configured input and request-body limits. Large inputs may be rejected by the gateway and surfaced as service errors.
 
 Fields:
 
@@ -276,7 +276,7 @@ Fields:
 - `file_paths` (optional list of local text, Markdown, HTML, CSV, JSON, or PDF paths)
 - `session_id` (optional; defaults to `input-analysis`)
 - `agent_id` (optional)
-- `model` (optional)
+- `model` (optional OpenResponses/OpenClaw route such as `openclaw`, `openclaw/default`, or `openclaw/<agentId>`)
 - `instructions` (optional)
 - `source` (optional; defaults to `automation`)
 
@@ -358,7 +358,7 @@ automation:
 
 5. Confirm the action returns an analysis response.
 
-6. Confirm the `openclaw_image_analysis_received` event fires with:
+6. Confirm the `openclaw_input_analysis_received` event fires with:
    - `analysis`
    - `response`
    - `session_id`
@@ -439,7 +439,7 @@ action:
       message: "{{ trigger.event.data.message }}"
 ```
 
-### `openclaw_image_analysis_received`
+### `openclaw_input_analysis_received`
 
 Fired when `openclaw.analyze_inputs` completes. Event data includes `analysis`, `response`, `session_id`, `agent_id`, `model`, `image_count`, `file_count`, `input_count`, `source`, and `timestamp`.
 

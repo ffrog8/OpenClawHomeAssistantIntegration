@@ -211,9 +211,10 @@ Fields:
 - `image_paths` (optional local image path list; existing image validation applies)
 - `file_paths` (optional local text, Markdown, HTML, CSV, JSON, or PDF path list)
 - `session_id` (optional, defaults to `input-analysis`)
-- `agent_id`, `model`, `instructions`, `source` (optional)
+- `agent_id`, `instructions`, `source` (optional)
+- `model` (optional OpenResponses/OpenClaw route such as `openclaw`, `openclaw/default`, or `openclaw/<agentId>`)
 
-The integration reads only Home Assistant-allowed local paths, base64-encodes supported image and file types, returns service response data, and fires `openclaw_image_analysis_received`. It does not downscale or recompress images. For generic files, OpenClaw Gateway/model feedback determines whether an individual attachment or total request is too large.
+The integration reads only Home Assistant-allowed local paths, base64-encodes supported image and file types, returns service response data, and fires `openclaw_input_analysis_received`. It does not downscale or recompress images. For generic files, OpenClaw Gateway enforces its configured input and request-body limits. Large inputs may be rejected by the gateway and surfaced as service errors.
 
 Automation example (compare two image snapshots):
 
@@ -345,7 +346,7 @@ action:
 mode: queued
 ```
 
-## `openclaw_image_analysis_received`
+## `openclaw_input_analysis_received`
 Fires after `openclaw.analyze_inputs` completes. Includes `analysis`, `response`, `session_id`, `agent_id`, `model`, `image_count`, `file_count`, `input_count`, `source`, and `timestamp`.
 
 ## `openclaw_tool_invoked`

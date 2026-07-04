@@ -117,7 +117,7 @@ PLATFORMS = ["sensor", "binary_sensor", "conversation", "event", "button", "sele
 # Events
 EVENT_MESSAGE_RECEIVED = f"{DOMAIN}_message_received"
 EVENT_TOOL_INVOKED = f"{DOMAIN}_tool_invoked"
-EVENT_IMAGE_ANALYSIS_RECEIVED = f"{DOMAIN}_image_analysis_received"
+EVENT_INPUT_ANALYSIS_RECEIVED = f"{DOMAIN}_input_analysis_received"
 
 # Services
 SERVICE_SEND_MESSAGE = "send_message"

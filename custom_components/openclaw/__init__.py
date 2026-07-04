@@ -90,7 +90,7 @@ from .const import (
     DEFAULT_VOICE_PROVIDER,
     DEFAULT_THINKING_TIMEOUT,
     DOMAIN,
-    EVENT_IMAGE_ANALYSIS_RECEIVED,
+    EVENT_INPUT_ANALYSIS_RECEIVED,
     EVENT_MESSAGE_RECEIVED,
     EVENT_TOOL_INVOKED,
     OPENCLAW_CONFIG_REL_PATH,
@@ -110,7 +110,6 @@ _LOGGER = logging.getLogger(__name__)
 _MAX_CHAT_HISTORY = 200
 _MAX_ANALYZE_INPUTS = 8
 _MAX_ANALYZE_IMAGES = 8
-_MAX_IMAGE_BYTES = 10 * 1024 * 1024
 _ALLOWED_IMAGE_MIME_TYPES = {
     "image/jpeg",
     "image/png",
@@ -590,7 +589,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
                 },
             )
 
-    async def handle_analyze_inputs(call: ServiceCall) -> dict[str, Any]:
+    async def handle_analyze_inputs(call: ServiceCall) -> dict[str, Any] | None:
         """Handle OpenClaw input analysis service calls."""
         prompt: str = call.data[ATTR_PROMPT]
         image_paths: list[str] = call.data.get(ATTR_IMAGE_PATHS) or []
@@ -627,6 +626,8 @@ def _async_register_services(hass: HomeAssistant) -> None:
         except OpenClawApiError as err:
             raise HomeAssistantError(f"OpenClaw input analysis failed: {err}") from err
 
+        _raise_for_failed_openresponses_response(response)
+
         analysis = _extract_response_analysis(response)
         timestamp = datetime.now(timezone.utc).isoformat()
         model_used = response.get("model") if isinstance(response, dict) else None
@@ -642,9 +643,11 @@ def _async_register_services(hass: HomeAssistant) -> None:
             ATTR_SOURCE: source,
             ATTR_TIMESTAMP: timestamp,
         }
-        hass.bus.async_fire(EVENT_IMAGE_ANALYSIS_RECEIVED, result)
+        hass.bus.async_fire(EVENT_INPUT_ANALYSIS_RECEIVED, result)
         coordinator.update_last_activity()
-        return result
+        if getattr(call, "return_response", False):
+            return result
+        return None
 
     async def handle_clear_history(call: ServiceCall) -> None:
         """Handle the openclaw.clear_history service call."""
@@ -829,16 +832,11 @@ def _guess_image_media_type(path: Path) -> str:
 
 
 def _read_analysis_image(path: Path) -> bytes:
-    """Read an image from disk after validating size and file type."""
+    """Read an image from disk after validating it is a regular file."""
     if not path.exists():
         raise ServiceValidationError(f"Image file does not exist: {path.name}")
     if not path.is_file():
         raise ServiceValidationError(f"Image path is not a file: {path.name}")
-    size = path.stat().st_size
-    if size > _MAX_IMAGE_BYTES:
-        raise ServiceValidationError(
-            f"Image '{path.name}' is too large ({size} bytes); maximum is {_MAX_IMAGE_BYTES} bytes"
-        )
     try:
         return path.read_bytes()
     except OSError as err:
@@ -914,6 +912,35 @@ async def _async_read_analysis_files(
             }
         )
     return files
+
+
+def _raise_for_failed_openresponses_response(response: dict[str, Any]) -> None:
+    """Raise HomeAssistantError for failed OpenResponses statuses."""
+    if not isinstance(response, dict):
+        return
+
+    status = response.get("status")
+    error = response.get("error")
+    error_status = error.get("status") if isinstance(error, dict) else None
+    failed = status in {"failed", "cancelled"}
+    failed = failed or (status == "incomplete" and isinstance(error, dict))
+    failed = failed or error_status in {"failed", "cancelled", "error"}
+    if not failed:
+        return
+
+    error_message: str | None = None
+    if isinstance(error, dict):
+        message = error.get("message")
+        if isinstance(message, str) and message.strip():
+            error_message = message.strip()
+    elif isinstance(error, str) and error.strip():
+        error_message = error.strip()
+
+    if error_message:
+        raise HomeAssistantError(
+            f"OpenClaw input analysis failed ({status}): {error_message}"
+        )
+    raise HomeAssistantError(f"OpenClaw input analysis failed with status: {status}")
 
 
 def _extract_response_analysis(response: dict[str, Any]) -> str:

@@ -137,7 +137,7 @@ analyze_inputs:
         text:
     model:
       name: Model
-      description: Optional explicit OpenResponses model. If omitted, the integration active model is used when configured.
+      description: Optional OpenResponses/OpenClaw model route or agent target, such as openclaw, openclaw/default, or openclaw/<agentId>. If omitted, the integration active model route is used when configured.
       required: false
       selector:
         text:
@@ -172,7 +172,7 @@ analyze_images:
           multiline: true
     image_paths:
       name: Image Paths
-      description: Local Home Assistant image paths to read and send as base64 images (maximum 8 images, 10 MiB each).
+      description: Local Home Assistant image paths to read and send as base64 images (maximum 8 images).
       required: true
       example:
         - "/config/www/inputs/image_before.jpg"
@@ -195,7 +195,7 @@ analyze_images:
         text:
     model:
       name: Model
-      description: Optional explicit OpenResponses model. If omitted, the integration active model is used when configured.
+      description: Optional OpenResponses/OpenClaw model route or agent target, such as openclaw, openclaw/default, or openclaw/<agentId>. If omitted, the integration active model route is used when configured.
       required: false
       selector:
         text:
