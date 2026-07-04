@@ -117,14 +117,21 @@ PLATFORMS = ["sensor", "binary_sensor", "conversation", "event", "button", "sele
 # Events
 EVENT_MESSAGE_RECEIVED = f"{DOMAIN}_message_received"
 EVENT_TOOL_INVOKED = f"{DOMAIN}_tool_invoked"
+EVENT_IMAGE_ANALYSIS_RECEIVED = f"{DOMAIN}_image_analysis_received"
 
 # Services
 SERVICE_SEND_MESSAGE = "send_message"
+SERVICE_ANALYZE_IMAGES = "analyze_images"
 SERVICE_CLEAR_HISTORY = "clear_history"
 SERVICE_INVOKE_TOOL = "invoke_tool"
 
 # Attributes
 ATTR_MESSAGE = "message"
+ATTR_PROMPT = "prompt"
+ATTR_IMAGE_PATHS = "image_paths"
+ATTR_INSTRUCTIONS = "instructions"
+ATTR_IMAGE_COUNT = "image_count"
+ATTR_ANALYSIS = "analysis"
 ATTR_SOURCE = "source"
 ATTR_SESSION_ID = "session_id"
 ATTR_ATTACHMENTS = "attachments"
@@ -149,4 +156,5 @@ ATTR_DURATION_MS = "duration_ms"
 # home page (text/html) for any unrecognised route.
 API_MODELS = "/v1/models"
 API_CHAT_COMPLETIONS = "/v1/chat/completions"
+API_RESPONSES = "/v1/responses"
 API_TOOLS_INVOKE = "/tools/invoke"

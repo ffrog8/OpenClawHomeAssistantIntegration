@@ -12,6 +12,7 @@ import aiohttp
 from .const import (
     API_CHAT_COMPLETIONS,
     API_MODELS,
+    API_RESPONSES,
     API_TOOLS_INVOKE,
 )
 
@@ -257,6 +258,85 @@ class OpenClawApiClient:
                 if resp.status >= 400:
                     text = await resp.text()
                     raise OpenClawApiError(f"Chat error {resp.status}: {text[:200]}")
+                return await resp.json()
+
+        except (aiohttp.ClientConnectorError, aiohttp.ClientOSError, asyncio.TimeoutError) as err:
+            raise OpenClawConnectionError(
+                f"Cannot connect to OpenClaw gateway: {err}"
+            ) from err
+
+
+    async def async_create_response(
+        self,
+        prompt: str,
+        images: list[dict[str, str]],
+        session_id: str | None = None,
+        model: str | None = None,
+        instructions: str | None = None,
+        agent_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Create a non-streaming OpenResponses response for image analysis."""
+        content: list[dict[str, Any]] = [{"type": "input_text", "text": prompt}]
+        for image in images:
+            content.append(
+                {
+                    "type": "input_image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": image["media_type"],
+                        "data": image["data"],
+                    },
+                }
+            )
+
+        payload: dict[str, Any] = {
+            "model": model or (f"openclaw/{agent_id}" if agent_id else "openclaw"),
+            "input": [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": content,
+                }
+            ],
+            "stream": False,
+        }
+        if session_id:
+            payload["user"] = session_id
+        if instructions:
+            payload["instructions"] = instructions
+
+        headers = self._headers(agent_id=agent_id)
+        if session_id:
+            headers["x-openclaw-session-key"] = session_id
+
+        session = await self._get_session()
+        url = f"{self._base_url}{API_RESPONSES}"
+
+        try:
+            async with session.post(
+                url,
+                headers=headers,
+                json=payload,
+                timeout=STREAM_TIMEOUT,
+                ssl=self._ssl_param,
+            ) as resp:
+                if resp.status == 401:
+                    raise OpenClawAuthError("Authentication failed")
+                if resp.status == 403:
+                    raise OpenClawAuthError("Access forbidden — token may be invalid")
+                if resp.status >= 400:
+                    text = await resp.text()
+                    raise OpenClawApiError(f"Responses error {resp.status}: {text[:300]}")
+
+                content_type = resp.content_type or ""
+                if "json" not in content_type:
+                    text = await resp.text()
+                    raise OpenClawApiError(
+                        f"Unexpected /v1/responses content type '{content_type}' (expected JSON). "
+                        "The OpenResponses endpoint may not be enabled; set "
+                        "gateway.http.endpoints.responses.enabled = true in OpenClaw config. "
+                        f"Response: {text[:200]}"
+                    )
                 return await resp.json()
 
         except (aiohttp.ClientConnectorError, aiohttp.ClientOSError, asyncio.TimeoutError) as err:

@@ -6,7 +6,9 @@ Sets up the OpenClaw integration: API client, coordinator, platforms, and servic
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
+import mimetypes
 from datetime import datetime, timezone
 import logging
 from pathlib import Path
@@ -24,14 +26,20 @@ except ImportError:  # pragma: no cover
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
-from homeassistant.core import HomeAssistant, ServiceCall, callback
+from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse, callback
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import OpenClawApiClient, OpenClawApiError
 from .const import (
+    ATTR_ANALYSIS,
     ATTR_AGENT_ID,
+    ATTR_IMAGE_COUNT,
+    ATTR_IMAGE_PATHS,
+    ATTR_INSTRUCTIONS,
     ATTR_MESSAGE,
+    ATTR_PROMPT,
     ATTR_MODEL,
     ATTR_OK,
     ATTR_RESULT,
@@ -79,10 +87,12 @@ from .const import (
     DEFAULT_VOICE_PROVIDER,
     DEFAULT_THINKING_TIMEOUT,
     DOMAIN,
+    EVENT_IMAGE_ANALYSIS_RECEIVED,
     EVENT_MESSAGE_RECEIVED,
     EVENT_TOOL_INVOKED,
     OPENCLAW_CONFIG_REL_PATH,
     PLATFORMS,
+    SERVICE_ANALYZE_IMAGES,
     SERVICE_CLEAR_HISTORY,
     SERVICE_INVOKE_TOOL,
     SERVICE_SEND_MESSAGE,
@@ -94,6 +104,16 @@ from .helpers import extract_text_recursive
 _LOGGER = logging.getLogger(__name__)
 
 _MAX_CHAT_HISTORY = 200
+_MAX_ANALYZE_IMAGES = 8
+_MAX_IMAGE_BYTES = 10 * 1024 * 1024
+_ALLOWED_IMAGE_MIME_TYPES = {
+    "image/jpeg",
+    "image/png",
+    "image/gif",
+    "image/webp",
+    "image/heic",
+    "image/heif",
+}
 
 _VOICE_REQUEST_HEADERS = {
     "x-openclaw-source": "voice",
@@ -119,6 +139,20 @@ SEND_MESSAGE_SCHEMA = vol.Schema(
         vol.Optional(ATTR_SOURCE): cv.string,
         vol.Optional(ATTR_SESSION_ID): cv.string,
         vol.Optional(ATTR_AGENT_ID): cv.string,
+    }
+)
+
+ANALYZE_IMAGES_SCHEMA = vol.Schema(
+    {
+        vol.Required(ATTR_PROMPT): cv.string,
+        vol.Required(ATTR_IMAGE_PATHS): vol.All(
+            cv.ensure_list, [cv.string], vol.Length(min=1, max=_MAX_ANALYZE_IMAGES)
+        ),
+        vol.Optional(ATTR_SESSION_ID, default="image-analysis"): cv.string,
+        vol.Optional(ATTR_AGENT_ID): cv.string,
+        vol.Optional(ATTR_MODEL): cv.string,
+        vol.Optional(ATTR_INSTRUCTIONS): cv.string,
+        vol.Optional(ATTR_SOURCE, default="automation"): cv.string,
     }
 )
 
@@ -511,6 +545,57 @@ def _async_register_services(hass: HomeAssistant) -> None:
                 },
             )
 
+    async def handle_analyze_images(call: ServiceCall) -> dict[str, Any]:
+        """Handle the openclaw.analyze_images service call."""
+        prompt: str = call.data[ATTR_PROMPT]
+        image_paths: list[str] = call.data[ATTR_IMAGE_PATHS]
+        session_id: str = call.data.get(ATTR_SESSION_ID) or "image-analysis"
+        call_agent_id = _normalize_optional_text(call.data.get(ATTR_AGENT_ID))
+        call_model = _normalize_optional_text(call.data.get(ATTR_MODEL))
+        instructions = _normalize_optional_text(call.data.get(ATTR_INSTRUCTIONS))
+        source: str = call.data.get(ATTR_SOURCE) or "automation"
+
+        entry_data = _get_first_entry_data(hass)
+        if not entry_data:
+            raise HomeAssistantError("No OpenClaw integration configured")
+
+        client: OpenClawApiClient = entry_data["client"]
+        coordinator: OpenClawCoordinator = entry_data["coordinator"]
+        options = _get_entry_options(hass, entry_data)
+        active_model = _normalize_optional_text(options.get("active_model"))
+        model = call_model or active_model
+
+        images = await _async_read_analysis_images(hass, image_paths)
+
+        try:
+            response = await client.async_create_response(
+                prompt=prompt,
+                images=images,
+                session_id=session_id,
+                model=model,
+                instructions=instructions,
+                agent_id=call_agent_id,
+            )
+        except OpenClawApiError as err:
+            raise HomeAssistantError(f"OpenClaw image analysis failed: {err}") from err
+
+        analysis = _extract_response_analysis(response)
+        timestamp = datetime.now(timezone.utc).isoformat()
+        model_used = response.get("model") if isinstance(response, dict) else None
+        result = {
+            ATTR_ANALYSIS: analysis,
+            "response": response,
+            ATTR_SESSION_ID: session_id,
+            ATTR_AGENT_ID: call_agent_id,
+            ATTR_MODEL: model_used or model,
+            ATTR_IMAGE_COUNT: len(images),
+            ATTR_SOURCE: source,
+            ATTR_TIMESTAMP: timestamp,
+        }
+        hass.bus.async_fire(EVENT_IMAGE_ANALYSIS_RECEIVED, result)
+        coordinator.update_last_activity()
+        return result
+
     async def handle_clear_history(call: ServiceCall) -> None:
         """Handle the openclaw.clear_history service call."""
         session_id: str | None = call.data.get(ATTR_SESSION_ID)
@@ -595,6 +680,14 @@ def _async_register_services(hass: HomeAssistant) -> None:
             handle_send_message,
             schema=SEND_MESSAGE_SCHEMA,
         )
+    if not hass.services.has_service(DOMAIN, SERVICE_ANALYZE_IMAGES):
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_ANALYZE_IMAGES,
+            handle_analyze_images,
+            schema=ANALYZE_IMAGES_SCHEMA,
+            supports_response=SupportsResponse.OPTIONAL,
+        )
     if not hass.services.has_service(DOMAIN, SERVICE_CLEAR_HISTORY):
         hass.services.async_register(
             DOMAIN,
@@ -638,6 +731,111 @@ def _get_entry_options(hass: HomeAssistant, entry_data: dict[str, Any]) -> dict[
 
     return latest_entry.options if latest_entry else {}
 
+
+def _resolve_analysis_image_path(hass: HomeAssistant, raw_path: str) -> Path:
+    """Resolve an image path against HA config and enforce HA path allow rules."""
+    if not raw_path.strip():
+        raise ServiceValidationError("Image paths must not be empty")
+
+    path = Path(raw_path).expanduser()
+    if not path.is_absolute():
+        path = Path(hass.config.path(str(path)))
+    path = path.resolve()
+
+    is_allowed_path = getattr(hass.config, "is_allowed_path", None)
+    if callable(is_allowed_path) and not is_allowed_path(str(path)):
+        raise ServiceValidationError(
+            "Image path is not allowed by Home Assistant path configuration"
+        )
+    return path
+
+
+def _guess_image_media_type(path: Path) -> str:
+    """Return a supported MIME type for an image path."""
+    suffix = path.suffix.lower()
+    if suffix in {".jpg", ".jpeg"}:
+        return "image/jpeg"
+    if suffix == ".heic":
+        return "image/heic"
+    if suffix == ".heif":
+        return "image/heif"
+    media_type = mimetypes.guess_type(path.name)[0]
+    if media_type == "image/jpg":
+        media_type = "image/jpeg"
+    if media_type not in _ALLOWED_IMAGE_MIME_TYPES:
+        raise ServiceValidationError(
+            f"Unsupported image type for '{path.name}'. Supported types: "
+            f"{', '.join(sorted(_ALLOWED_IMAGE_MIME_TYPES))}"
+        )
+    return media_type
+
+
+def _read_analysis_image(path: Path) -> bytes:
+    """Read an image from disk after validating size and file type."""
+    if not path.exists():
+        raise ServiceValidationError(f"Image file does not exist: {path.name}")
+    if not path.is_file():
+        raise ServiceValidationError(f"Image path is not a file: {path.name}")
+    size = path.stat().st_size
+    if size > _MAX_IMAGE_BYTES:
+        raise ServiceValidationError(
+            f"Image '{path.name}' is too large ({size} bytes); maximum is {_MAX_IMAGE_BYTES} bytes"
+        )
+    try:
+        return path.read_bytes()
+    except OSError as err:
+        raise HomeAssistantError(f"Unable to read image '{path.name}': {err}") from err
+
+
+async def _async_read_analysis_images(
+    hass: HomeAssistant, image_paths: list[str]
+) -> list[dict[str, str]]:
+    """Read, validate, and base64-encode analysis images."""
+    images: list[dict[str, str]] = []
+    for raw_path in image_paths:
+        path = _resolve_analysis_image_path(hass, raw_path)
+        media_type = _guess_image_media_type(path)
+        data = await hass.async_add_executor_job(_read_analysis_image, path)
+        images.append(
+            {
+                "media_type": media_type,
+                "data": base64.b64encode(data).decode("ascii"),
+            }
+        )
+    return images
+
+
+def _extract_response_analysis(response: dict[str, Any]) -> str:
+    """Extract readable text from an OpenResponses response without image data."""
+    output_text = response.get("output_text")
+    if isinstance(output_text, str) and output_text.strip():
+        return output_text.strip()
+
+    extracted = extract_text_recursive(response)
+    if extracted:
+        return extracted
+
+    texts: list[str] = []
+
+    def _walk(value: Any) -> None:
+        if isinstance(value, dict):
+            if value.get("type") in {"input_image", "image"}:
+                return
+            for key in ("text", "content", "output_text"):
+                text_value = value.get(key)
+                if isinstance(text_value, str) and text_value.strip():
+                    texts.append(text_value.strip())
+            for child in value.values():
+                if not isinstance(child, str):
+                    _walk(child)
+        elif isinstance(value, list):
+            for item in value:
+                _walk(item)
+
+    _walk(response.get("output"))
+    if texts:
+        return "\n".join(texts)
+    return "Response received, but no readable analysis content was found."
 
 def _summarize_tool_result(value: Any, max_len: int = 240) -> str | None:
     """Return compact string preview of tool result payload."""

@@ -194,6 +194,72 @@ action:
 mode: single
 ```
 
+
+## `openclaw.analyze_images`
+Backend-only CCTV/image analysis through OpenClaw Gateway `/v1/responses`. This service is separate from `openclaw.send_message`; it does not add chat-card attachments or frontend changes.
+
+OpenClaw must have OpenResponses enabled:
+
+```text
+gateway.http.endpoints.responses.enabled = true
+```
+
+Fields:
+- `prompt` (required)
+- `image_paths` (required local image path list; maximum 8 images, 10 MiB each)
+- `session_id` (optional, defaults to `image-analysis`)
+- `agent_id`, `model`, `instructions`, `source` (optional)
+
+The integration reads only Home Assistant-allowed local image paths, base64-encodes supported image types, returns service response data, and fires `openclaw_image_analysis_received`. It does not downscale or recompress images, so configure snapshots to produce reasonable JPEG sizes.
+
+Automation example (compare two driveway snapshots):
+
+```yaml
+automation:
+  - alias: CCTV compare driveway snapshots with OpenClaw
+    mode: queued
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.driveway_motion
+        to: "on"
+    actions:
+      - action: camera.snapshot
+        target:
+          entity_id: camera.driveway
+        data:
+          filename: "/config/www/cctv/driveway_before.jpg"
+
+      - delay: "00:00:02"
+
+      - action: camera.snapshot
+        target:
+          entity_id: camera.driveway
+        data:
+          filename: "/config/www/cctv/driveway_after.jpg"
+
+      - action: openclaw.analyze_images
+        data:
+          prompt: >
+            Compare these two driveway CCTV snapshots. Return compact JSON with
+            changed, objects, risk, summary, and notify.
+          image_paths:
+            - /config/www/cctv/driveway_before.jpg
+            - /config/www/cctv/driveway_after.jpg
+          session_id: cctv-driveway
+          agent_id: main
+        response_variable: openclaw_result
+
+      - if:
+          - condition: template
+            value_template: >
+              {{ '"notify":true' in (openclaw_result.analysis | lower | replace(' ', '')) }}
+        then:
+          - action: notify.mobile_app_phone
+            data:
+              title: Driveway camera
+              message: "{{ openclaw_result.analysis }}"
+```
+
 ## `openclaw.clear_history`
 Clears stored integration-side history for a specific session (or default/all depending call).
 
@@ -275,6 +341,9 @@ action:
       message: "OpenClaw: {{ trigger.event.data.message }}"
 mode: queued
 ```
+
+## `openclaw_image_analysis_received`
+Fires after `openclaw.analyze_images` completes. Includes `analysis`, `response`, `session_id`, `agent_id`, `model`, `image_count`, `source`, and `timestamp`.
 
 ## `openclaw_tool_invoked`
 Fires after `openclaw.invoke_tool` completes.
