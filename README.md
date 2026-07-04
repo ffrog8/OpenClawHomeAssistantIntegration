@@ -324,6 +324,48 @@ automation:
               message: "{{ openclaw_result.analysis }}"
 ```
 
+#### Manual runtime validation
+
+1. Ensure OpenClaw Gateway has:
+
+   ```text
+   gateway.http.endpoints.responses.enabled = true
+   ```
+
+2. Install this integration branch in Home Assistant and restart HA.
+
+3. Place a small JPEG snapshot at:
+
+   ```text
+   /config/www/cctv/test.jpg
+   ```
+
+4. In **Home Assistant Developer Tools > Actions**, call:
+
+   ```yaml
+   action: openclaw.analyze_images
+   data:
+     prompt: "Describe this CCTV image in one sentence."
+     image_paths:
+       - /config/www/cctv/test.jpg
+     session_id: cctv-test
+     agent_id: main
+   ```
+
+5. Confirm the action returns an analysis response.
+
+6. Confirm the `openclaw_image_analysis_received` event fires with:
+   - `analysis`
+   - `response`
+   - `session_id`
+   - `agent_id`
+   - `model`
+   - `image_count`
+   - `source`
+   - `timestamp`
+
+7. Then test a two-image CCTV comparison automation using `response_variable`.
+
 ### `openclaw.clear_history`
 
 Clear stored conversation history for a session.

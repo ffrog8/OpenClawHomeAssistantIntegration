@@ -811,9 +811,10 @@ def _extract_response_analysis(response: dict[str, Any]) -> str:
     if isinstance(output_text, str) and output_text.strip():
         return output_text.strip()
 
-    extracted = extract_text_recursive(response)
-    if extracted:
-        return extracted
+    for key in ("output", "choices"):
+        extracted = extract_text_recursive(response.get(key))
+        if extracted:
+            return extracted
 
     texts: list[str] = []
 

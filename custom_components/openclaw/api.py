@@ -337,7 +337,13 @@ class OpenClawApiClient:
                         "gateway.http.endpoints.responses.enabled = true in OpenClaw config. "
                         f"Response: {text[:200]}"
                     )
-                return await resp.json()
+                try:
+                    return await resp.json()
+                except (aiohttp.ContentTypeError, json.JSONDecodeError) as err:
+                    raise OpenClawApiError(
+                        "Malformed JSON from /v1/responses; the OpenResponses endpoint "
+                        "returned an invalid response body"
+                    ) from err
 
         except (aiohttp.ClientConnectorError, aiohttp.ClientOSError, asyncio.TimeoutError) as err:
             raise OpenClawConnectionError(
