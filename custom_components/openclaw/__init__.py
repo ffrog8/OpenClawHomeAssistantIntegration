@@ -95,7 +95,6 @@ from .const import (
     EVENT_TOOL_INVOKED,
     OPENCLAW_CONFIG_REL_PATH,
     PLATFORMS,
-    SERVICE_ANALYZE_IMAGES,
     SERVICE_ANALYZE_INPUTS,
     SERVICE_CLEAR_HISTORY,
     SERVICE_INVOKE_TOOL,
@@ -151,20 +150,6 @@ SEND_MESSAGE_SCHEMA = vol.Schema(
         vol.Optional(ATTR_SOURCE): cv.string,
         vol.Optional(ATTR_SESSION_ID): cv.string,
         vol.Optional(ATTR_AGENT_ID): cv.string,
-    }
-)
-
-ANALYZE_IMAGES_SCHEMA = vol.Schema(
-    {
-        vol.Required(ATTR_PROMPT): cv.string,
-        vol.Required(ATTR_IMAGE_PATHS): vol.All(
-            cv.ensure_list, [cv.string], vol.Length(min=1, max=_MAX_ANALYZE_IMAGES)
-        ),
-        vol.Optional(ATTR_SESSION_ID, default="image-analysis"): cv.string,
-        vol.Optional(ATTR_AGENT_ID): cv.string,
-        vol.Optional(ATTR_MODEL): cv.string,
-        vol.Optional(ATTR_INSTRUCTIONS): cv.string,
-        vol.Optional(ATTR_SOURCE, default="automation"): cv.string,
     }
 )
 
@@ -739,14 +724,6 @@ def _async_register_services(hass: HomeAssistant) -> None:
             SERVICE_ANALYZE_INPUTS,
             handle_analyze_inputs,
             schema=ANALYZE_INPUTS_SCHEMA,
-            supports_response=SupportsResponse.OPTIONAL,
-        )
-    if not hass.services.has_service(DOMAIN, SERVICE_ANALYZE_IMAGES):
-        hass.services.async_register(
-            DOMAIN,
-            SERVICE_ANALYZE_IMAGES,
-            handle_analyze_inputs,
-            schema=ANALYZE_IMAGES_SCHEMA,
             supports_response=SupportsResponse.OPTIONAL,
         )
     if not hass.services.has_service(DOMAIN, SERVICE_CLEAR_HISTORY):

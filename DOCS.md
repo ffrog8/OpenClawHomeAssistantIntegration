@@ -198,7 +198,7 @@ mode: single
 ## `openclaw.analyze_inputs`
 Backend-only input analysis through OpenClaw Gateway `/v1/responses`. This preferred generic service accepts local images and supported files. It is separate from `openclaw.send_message`; it does not add chat-card attachments or frontend changes.
 
-`openclaw.analyze_images` remains available for backward-compatible image-only automations, but new automations should use `openclaw.analyze_inputs`.
+Use `image_paths` for image-only analysis, `file_paths` for supported files, or both together in one request.
 
 OpenClaw must have OpenResponses enabled:
 

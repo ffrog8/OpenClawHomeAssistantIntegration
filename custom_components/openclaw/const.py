@@ -121,7 +121,6 @@ EVENT_INPUT_ANALYSIS_RECEIVED = f"{DOMAIN}_input_analysis_received"
 
 # Services
 SERVICE_SEND_MESSAGE = "send_message"
-SERVICE_ANALYZE_IMAGES = "analyze_images"
 SERVICE_ANALYZE_INPUTS = "analyze_inputs"
 SERVICE_CLEAR_HISTORY = "clear_history"
 SERVICE_INVOKE_TOOL = "invoke_tool"

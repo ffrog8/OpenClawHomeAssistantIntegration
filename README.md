@@ -29,7 +29,6 @@ OpenClaw is a Home Assistant custom integration that connects your HA instance t
   - `openclaw.clear_history`
   - `openclaw.invoke_tool`
   - `openclaw.analyze_inputs` (preferred)
-  - `openclaw.analyze_images` (backward-compatible image-only alias)
 - **Integration options** for model selection and voice-specific routing
 - **Event**
   - `openclaw_message_received`
@@ -259,7 +258,7 @@ data:
 
 Analyze local Home Assistant images and supported files with OpenClaw Gateway `/v1/responses`. This is the preferred backend-only automation service for input analysis; it does not add chat-card attachments and does not change `openclaw.send_message`.
 
-`openclaw.analyze_images` remains available for backward-compatible image-only automations, but new automations should use `openclaw.analyze_inputs`.
+Use `image_paths` for image-only analysis, `file_paths` for supported files, or both together in one request.
 
 OpenClaw must have the OpenResponses endpoint enabled:
 
