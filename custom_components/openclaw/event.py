@@ -3,6 +3,7 @@
 Provides native HA EventEntity entities for:
 - openclaw_message_received — fires on each assistant reply
 - openclaw_tool_invoked — fires on each tool invocation result
+- openclaw_input_analysis_received — fires on each input analysis result
 
 These complement the raw HA bus events with proper entity-registry entries
 that are selectable in the automation UI (no YAML needed).
@@ -19,6 +20,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
     DOMAIN,
+    EVENT_INPUT_ANALYSIS_RECEIVED,
     EVENT_MESSAGE_RECEIVED,
     EVENT_TOOL_INVOKED,
 )
@@ -37,6 +39,13 @@ EVENT_DESCRIPTIONS: tuple[EventEntityDescription, ...] = (
         name="OpenClaw Tool Invoked",
         icon="mdi:tools",
         event_types=["tool_invoked_ok", "tool_invoked_error"],
+    ),
+    EventEntityDescription(
+        key="input_analysis_received",
+        translation_key="input_analysis_received",
+        name="OpenClaw Input Analysis Received",
+        icon="mdi:file-eye",
+        event_types=["input_analysis_received"],
     ),
 )
 
@@ -84,6 +93,8 @@ class OpenClawEventEntity(EventEntity):
             bus_event = EVENT_MESSAGE_RECEIVED
         elif key == "tool_invoked":
             bus_event = EVENT_TOOL_INVOKED
+        elif key == "input_analysis_received":
+            bus_event = EVENT_INPUT_ANALYSIS_RECEIVED
         else:
             return
 
@@ -96,6 +107,8 @@ class OpenClawEventEntity(EventEntity):
                 ok = data.get("ok", False)
                 event_type = "tool_invoked_ok" if ok else "tool_invoked_error"
                 self._trigger_event(event_type, data)
+            elif key == "input_analysis_received":
+                self._trigger_event("input_analysis_received", data)
             self.async_write_ha_state()
 
         self._unsub = self.hass.bus.async_listen(bus_event, _handle_event)

@@ -87,3 +87,71 @@ invoke_tool:
       required: false
       selector:
         text:
+
+analyze_inputs:
+  name: Analyze Inputs
+  description: >
+    Preferred generic input analysis service. Analyze local images and supported local files
+    with OpenClaw using the Gateway /v1/responses endpoint. Paths must be accessible
+    to Home Assistant. Inputs are sent as base64; URL inputs are not supported.
+  fields:
+    prompt:
+      name: Prompt
+      description: User instruction for the input analysis.
+      required: true
+      example: "Summarize this image and document."
+      selector:
+        text:
+          multiline: true
+    image_paths:
+      name: Image Paths
+      description: Optional local Home Assistant image paths to read and send as base64 images.
+      required: false
+      example:
+        - "/config/www/inputs/image.jpg"
+      selector:
+        object:
+    file_paths:
+      name: File Paths
+      description: >
+        Optional local text, Markdown, HTML, CSV, JSON, or PDF paths to read and send as base64 files.
+      required: false
+      example:
+        - "/config/www/inputs/report.pdf"
+        - "/config/www/inputs/notes.md"
+      selector:
+        object:
+    session_id:
+      name: Session ID
+      description: Optional analysis session ID used for OpenClaw routing/user context.
+      required: false
+      example: "input-analysis"
+      selector:
+        text:
+    agent_id:
+      name: Agent ID
+      description: Optional OpenClaw agent ID to route this analysis to.
+      required: false
+      example: "main"
+      selector:
+        text:
+    model:
+      name: Model
+      description: Optional OpenResponses/OpenClaw model route or agent target, such as openclaw, openclaw/default, or openclaw/<agentId>. If omitted, the integration active model route is used when configured.
+      required: false
+      selector:
+        text:
+    instructions:
+      name: Instructions
+      description: Optional OpenResponses instructions field.
+      required: false
+      selector:
+        text:
+          multiline: true
+    source:
+      name: Source
+      description: Optional event metadata source. Defaults to automation.
+      required: false
+      example: "automation"
+      selector:
+        text:

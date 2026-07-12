@@ -93,6 +93,9 @@
       },
       "tool_invoked": {
         "name": "Tool Invoked"
+      },
+      "input_analysis_received": {
+        "name": "Input Analysis Received"
       }
     },
     "button": {

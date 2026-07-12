@@ -28,6 +28,7 @@ OpenClaw is a Home Assistant custom integration that connects your HA instance t
   - `openclaw.send_message`
   - `openclaw.clear_history`
   - `openclaw.invoke_tool`
+  - `openclaw.analyze_inputs` (preferred)
 - **Integration options** for model selection and voice-specific routing
 - **Event**
   - `openclaw_message_received`
@@ -252,6 +253,124 @@ data:
   session_id: "living-room-session"
 ```
 
+
+### `openclaw.analyze_inputs`
+
+Analyze local Home Assistant images and supported files with OpenClaw Gateway `/v1/responses`. This is the preferred backend-only automation service for input analysis; it does not add chat-card attachments and does not change `openclaw.send_message`.
+
+Use `image_paths` for image-only analysis, `file_paths` for supported files, or both together in one request.
+
+OpenClaw must have the OpenResponses endpoint enabled:
+
+```text
+gateway.http.endpoints.responses.enabled = true
+```
+
+The service reads local paths that Home Assistant is allowed to access, base64-encodes supported images and files, sends them to OpenClaw, returns service response data, and fires `openclaw_input_analysis_received`. Images are not downscaled or recompressed by the integration. For generic files, OpenClaw Gateway enforces its configured input and request-body limits. Large inputs may be rejected by the gateway and surfaced as service errors.
+
+Fields:
+
+- `prompt` (required)
+- `image_paths` (optional list of local image paths; existing image validation applies)
+- `file_paths` (optional list of local text, Markdown, HTML, CSV, JSON, or PDF paths)
+- `session_id` (optional; defaults to `input-analysis`)
+- `agent_id` (optional)
+- `model` (optional OpenResponses/OpenClaw route such as `openclaw`, `openclaw/default`, or `openclaw/<agentId>`)
+- `instructions` (optional)
+- `source` (optional; defaults to `automation`)
+
+Two-image comparison example:
+
+```yaml
+automation:
+  - alias: Compare image snapshots with OpenClaw
+    mode: queued
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.example_motion
+        to: "on"
+    actions:
+      - action: camera.snapshot
+        target:
+          entity_id: camera.example
+        data:
+          filename: "/config/www/inputs/image_before.jpg"
+
+      - delay: "00:00:02"
+
+      - action: camera.snapshot
+        target:
+          entity_id: camera.example
+        data:
+          filename: "/config/www/inputs/image_after.jpg"
+
+      - action: openclaw.analyze_inputs
+        data:
+          prompt: >
+            Compare these two image snapshots. Return compact JSON with
+            changed, objects, risk, summary, and notify.
+          image_paths:
+            - /config/www/inputs/image_before.jpg
+            - /config/www/inputs/image_after.jpg
+          session_id: image-compare
+          agent_id: main
+        response_variable: openclaw_result
+
+      - if:
+          - condition: template
+            value_template: >
+              {{ '"notify":true' in (openclaw_result.analysis | lower | replace(' ', '')) }}
+        then:
+          - action: notify.mobile_app_phone
+            data:
+              title: Input analysis
+              message: "{{ openclaw_result.analysis }}"
+```
+
+#### Manual runtime validation
+
+1. Ensure OpenClaw Gateway has:
+
+   ```text
+   gateway.http.endpoints.responses.enabled = true
+   ```
+
+2. Install this integration branch in Home Assistant and restart HA.
+
+3. Place a small JPEG snapshot at:
+
+   ```text
+   /config/www/cctv/test.jpg
+   ```
+
+4. In **Home Assistant Developer Tools > Actions**, call:
+
+   ```yaml
+   action: openclaw.analyze_inputs
+   data:
+     prompt: "Describe this CCTV image in one sentence."
+     image_paths:
+       - /config/www/cctv/test.jpg
+     session_id: cctv-test
+     agent_id: main
+   ```
+
+5. Confirm the action returns an analysis response.
+
+6. Confirm the `openclaw_input_analysis_received` event fires with:
+   - `analysis`
+   - `response`
+   - `session_id`
+   - `agent_id`
+   - `model`
+   - `image_count`
+   - `file_count`
+   - `input_count`
+   - `source`
+   - `timestamp`
+
+7. Then test a two-image CCTV comparison automation using `response_variable`.
+
 ### `openclaw.clear_history`
 
 Clear stored conversation history for a session.
@@ -318,6 +437,10 @@ action:
     data:
       message: "{{ trigger.event.data.message }}"
 ```
+
+### `openclaw_input_analysis_received`
+
+Fired when `openclaw.analyze_inputs` completes. Event data includes `analysis`, `response`, `session_id`, `agent_id`, `model`, `image_count`, `file_count`, `input_count`, `source`, and `timestamp`.
 
 ### `openclaw_tool_invoked`
 

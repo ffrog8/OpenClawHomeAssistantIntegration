@@ -194,6 +194,76 @@ action:
 mode: single
 ```
 
+
+## `openclaw.analyze_inputs`
+Backend-only input analysis through OpenClaw Gateway `/v1/responses`. This preferred generic service accepts local images and supported files. It is separate from `openclaw.send_message`; it does not add chat-card attachments or frontend changes.
+
+Use `image_paths` for image-only analysis, `file_paths` for supported files, or both together in one request.
+
+OpenClaw must have OpenResponses enabled:
+
+```text
+gateway.http.endpoints.responses.enabled = true
+```
+
+Fields:
+- `prompt` (required)
+- `image_paths` (optional local image path list; existing image validation applies)
+- `file_paths` (optional local text, Markdown, HTML, CSV, JSON, or PDF path list)
+- `session_id` (optional, defaults to `input-analysis`)
+- `agent_id`, `instructions`, `source` (optional)
+- `model` (optional OpenResponses/OpenClaw route such as `openclaw`, `openclaw/default`, or `openclaw/<agentId>`)
+
+The integration reads only Home Assistant-allowed local paths, base64-encodes supported image and file types, returns service response data, and fires `openclaw_input_analysis_received`. It does not downscale or recompress images. For generic files, OpenClaw Gateway enforces its configured input and request-body limits. Large inputs may be rejected by the gateway and surfaced as service errors.
+
+Automation example (compare two image snapshots):
+
+```yaml
+automation:
+  - alias: Compare image snapshots with OpenClaw
+    mode: queued
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.example_motion
+        to: "on"
+    actions:
+      - action: camera.snapshot
+        target:
+          entity_id: camera.example
+        data:
+          filename: "/config/www/inputs/image_before.jpg"
+
+      - delay: "00:00:02"
+
+      - action: camera.snapshot
+        target:
+          entity_id: camera.example
+        data:
+          filename: "/config/www/inputs/image_after.jpg"
+
+      - action: openclaw.analyze_inputs
+        data:
+          prompt: >
+            Compare these two image snapshots. Return compact JSON with
+            changed, objects, risk, summary, and notify.
+          image_paths:
+            - /config/www/inputs/image_before.jpg
+            - /config/www/inputs/image_after.jpg
+          session_id: image-compare
+          agent_id: main
+        response_variable: openclaw_result
+
+      - if:
+          - condition: template
+            value_template: >
+              {{ '"notify":true' in (openclaw_result.analysis | lower | replace(' ', '')) }}
+        then:
+          - action: notify.mobile_app_phone
+            data:
+              title: Input analysis
+              message: "{{ openclaw_result.analysis }}"
+```
+
 ## `openclaw.clear_history`
 Clears stored integration-side history for a specific session (or default/all depending call).
 
@@ -275,6 +345,9 @@ action:
       message: "OpenClaw: {{ trigger.event.data.message }}"
 mode: queued
 ```
+
+## `openclaw_input_analysis_received`
+Fires after `openclaw.analyze_inputs` completes. Includes `analysis`, `response`, `session_id`, `agent_id`, `model`, `image_count`, `file_count`, `input_count`, `source`, and `timestamp`.
 
 ## `openclaw_tool_invoked`
 Fires after `openclaw.invoke_tool` completes.
